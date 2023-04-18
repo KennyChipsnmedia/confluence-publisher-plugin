@@ -47,7 +47,9 @@ import java.io.IOException;
 import java.net.URLConnection;
 import java.rmi.RemoteException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import jenkins.plugins.confluence.soap.v1.RemoteAttachment;
 import jenkins.plugins.confluence.soap.v1.RemotePage;
@@ -254,6 +256,56 @@ public class ConfluencePublisher extends Notifier implements Saveable {
         return true;
     }
 
+
+    private RemotePageSummary parsePage(AbstractBuild<?, ?> build, ConfluenceSession session, BuildListener listener) throws RemoteException{
+        String spaceName = this.spaceName;
+        String pageName = this.pageName;
+        try {
+            spaceName = build.getEnvironment(listener).expand(spaceName);
+            pageName = build.getEnvironment(listener).expand(pageName);
+        } catch (IOException e) {
+            log(listener, e.getMessage());
+            e.printStackTrace(listener.getLogger());
+        } catch (InterruptedException e) {
+            log(listener, e.getMessage());
+            e.printStackTrace(listener.getLogger());
+        }
+
+        List<String> pageList = Arrays.stream(pageName.split("/")).filter(s -> s.length() > 0).collect(Collectors.toList());
+        RemoteSpace space = session.getSpace(spaceName);
+        long parentId = space.getHomePage();
+        RemotePageSummary summary = null;
+
+        for(String page:  pageList) {
+            try {
+                summary = session.getPageSummary(spaceName, page);
+
+                if(summary != null) {
+
+                    log(listener,"page:" + page + " parentId:" + summary.getParentId() +" summary:" + summary.toString());
+                    parentId = summary.getId();
+                }
+                else {
+                    log(listener, "page:" + page + " summary null");
+                    throw new RemoteException("getpageSummary success, but retrun null, give up.");
+                }
+            }
+            catch (RemoteException e) {
+                if(parentId != space.getHomePage()) {
+                    log(listener, "page:" + page + " not found creating...");
+                    summary = createPage(session, spaceName, page, parentId);
+                    parentId = summary.getId();
+                }
+                else {
+                    log(listener, "page:" + page + " not found, but cannot create first child, so create page with full page.");
+                    summary = createPage(session, spaceName, pageName, space.getHomePage());
+                }
+            }
+
+        }
+        return summary;
+    }
+
     @Override
     public boolean perform(AbstractBuild<?, ?> build, Launcher launcher, BuildListener listener)
             throws RemoteException {
@@ -280,33 +332,33 @@ public class ConfluencePublisher extends Notifier implements Saveable {
                 .valueOf(buildResult));
         build.addAction(buildResultAction);
 
-        String spaceName = this.spaceName;
-        String pageName = this.pageName;
+//        String spaceName = this.spaceName;
+//        String pageName = this.pageName;
+//
+//        try {
+//            spaceName = build.getEnvironment(listener).expand(spaceName);
+//            pageName = build.getEnvironment(listener).expand(pageName);
+//            log(listener, "BBB:" + BBB +  " this.pageName:" + this.pageName + " pageName:" + pageName);
+//        } catch (IOException e) {
+//            e.printStackTrace(listener.getLogger());
+//        } catch (InterruptedException e) {
+//            e.printStackTrace(listener.getLogger());
+//        }
+
+        RemotePageSummary pageData = null;
 
         try {
-            spaceName = build.getEnvironment(listener).expand(spaceName);
-            pageName = build.getEnvironment(listener).expand(pageName);
-        } catch (IOException e) {
-            e.printStackTrace(listener.getLogger());
-        } catch (InterruptedException e) {
-            e.printStackTrace(listener.getLogger());
-        }
-
-        RemotePageSummary pageData;
-
-        try {
-            pageData = confluence.getPageSummary(spaceName, pageName);
+            pageData = parsePage(build, confluence, listener);
         } catch (RemoteException e) {
             // Still shouldn't fail the job, so just dump this to the console and keep going (true).
-            log(listener, "Unable to locate page: " + spaceName + "/" + pageName + ".  Attempting to create the page now...");
+            log(listener, "Unable to locate or create page:" + spaceName + "/" + pageName);
+            return true;
+        }
 
-            try {
-                pageData = this.createPage(confluence, spaceName, pageName);
-            } catch (RemoteException exc2) {
-                log(listener, "Page could not be created!  Aborting edits...");
-                e.printStackTrace(listener.getLogger());
-                return true;
-            }
+        if(pageData == null) {
+            log(listener, "parsePage return null, so give up.");
+            // still return true
+            return true;
         }
 
         // Perform attachment uploads
@@ -362,11 +414,12 @@ public class ConfluencePublisher extends Notifier implements Saveable {
      * @return The resulting Page
      * @throws RemoteException
      */
-    private RemotePage createPage(ConfluenceSession confluence, String spaceName, String pageName)
+    private RemotePage createPage(ConfluenceSession confluence, String spaceName, String pageName, long parentId)
             throws RemoteException {
         RemotePage newPage = new RemotePage();
         newPage.setTitle(pageName);
         newPage.setSpace(spaceName);
+        newPage.setParentId(parentId);
         newPage.setContent("");
         return confluence.storePage(newPage);
     }

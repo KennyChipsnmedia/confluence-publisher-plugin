@@ -44,7 +44,7 @@ public abstract class MarkupEditor implements Describable<MarkupEditor>, Extensi
      *
      * @param generator Markup generator
      */
-    @DataBoundConstructor
+    //@DataBoundConstructor
     public MarkupEditor(final MarkupGenerator generator) {
         this.generator = generator;
     }
