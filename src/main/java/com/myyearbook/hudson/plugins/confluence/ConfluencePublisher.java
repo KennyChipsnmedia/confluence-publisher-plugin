@@ -20,6 +20,8 @@ import hudson.EnvVars;
 import hudson.Extension;
 import hudson.FilePath;
 import hudson.Launcher;
+import hudson.console.HyperlinkNote;
+import hudson.console.ModelHyperlinkNote;
 import hudson.model.BuildListener;
 import hudson.model.EnvironmentContributingAction;
 import hudson.model.Result;
@@ -251,7 +253,13 @@ public class ConfluencePublisher extends Notifier implements Saveable {
                 ie.printStackTrace(listener.getLogger());
             }
         }
-        log(listener, "Done");
+
+        // Kenny
+        int buildNumber = build.getNumber();
+        String buildUrl = build.getParent().getAbsoluteUrl() + buildNumber;
+        String buildLink = String.format("<a href=\"%s\">#%d</a>", buildUrl, buildNumber);
+        log(listener, "Build:" + ModelHyperlinkNote.encodeTo(build));
+        log(listener, "Done.");
 
         return true;
     }
